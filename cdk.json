@@ -1,16 +1,19 @@
 
 {
-  "vpcCidr": "10.20.0.0/16",
-  "maxAzs": 2,
-  "natGateways": 1,
-  "instanceType": "t2.micro",
-  "minCapacity": 1,
-  "desiredCapacity": 2,
-  "maxCapacity": 4,
-  "cpuTarget": 50,
-  "healthCheckPath": "/health",
-  "dbEngine": "postgres",
-  "dbStorage": 20,
-  "dbMultiAz": false,
-  "dbInstanceType": "t3.micro"
+  "app": "npx ts-node --prefer-ts-exts bin/aws-cdk-deployment.ts",
+  "context": {
+    "vpcCidr": "10.20.0.0/16",
+    "maxAzs": 2,
+    "natGateways": 1,
+    "instanceType": "t2.micro",
+    "minCapacity": 1,
+    "desiredCapacity": 2,
+    "maxCapacity": 4,
+    "cpuTarget": 50,
+    "healthCheckPath": "/health",
+    "dbEngine": "postgres",
+    "dbStorage": 20,
+    "dbMultiAz": false,
+    "dbInstanceType": "t3.micro"
+  }
 }

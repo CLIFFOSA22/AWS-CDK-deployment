@@ -12,10 +12,11 @@
     "@swc/jest": "^0.2.39",
     "@types/jest": "^30",
     "@types/node": "^24.10.1",
+    "aws-cdk": "^2.1146.0",
     "jest": "^30",
-    "aws-cdk": "2.1143.0",
+    "ts-node": "^10.9.2",
     "tsx": "^4.23.0",
-    "typescript": "~7.0.2"
+    "typescript": "5.9"
   },
   "dependencies": {
     "aws-cdk-lib": "^2.270.0",
