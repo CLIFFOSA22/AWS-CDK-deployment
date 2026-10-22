@@ -41,7 +41,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ca-central-1
+          aws-region: ${{ secrets.AWS_REGION }}
 
       - name: CDK Deploy
         if: github.event_name == 'push'

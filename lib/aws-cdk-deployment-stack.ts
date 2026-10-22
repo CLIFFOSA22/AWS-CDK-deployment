@@ -11,33 +11,75 @@ export class MyCdkProjectStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // 1. Read CDK context
-    const instanceType = String(
-      this.node.tryGetContext('instanceType') ?? 't3.micro'
-    );
-    const minCapacity = Number(this.node.tryGetContext('minCapacity') ?? 1);
-    const desiredCapacity = Number(this.node.tryGetContext('desiredCapacity') ?? 2);
-    const maxCapacity = Number(this.node.tryGetContext('maxCapacity') ?? 3);
+    // 1. Read configuration from cdk.json
+    const requiredContext = (key: string): unknown => {
+      const value = this.node.tryGetContext(key);
+      if (value === undefined || value === null || value === '') {
+        throw new Error(`Missing CDK context parameter: ${key}`);
+      }
+      return value;
+    };
 
-    const dbEngine = String(this.node.tryGetContext('dbEngine') ?? 'mysql');
-    const dbStorage = Number(this.node.tryGetContext('dbStorage') ?? 20);
-    const dbMultiAz = String(this.node.tryGetContext('dbMultiAz') ?? false) === 'true';
-    const dbInstanceType = String(
-      this.node.tryGetContext('dbInstanceType') ?? 't3.micro'
-    );
+    const vpcCidr = String(requiredContext('vpcCidr'));
+    const maxAzs = Number(requiredContext('maxAzs'));
+    const natGateways = Number(requiredContext('natGateways'));
 
+    const instanceType = String(requiredContext('instanceType'));
+    const minCapacity = Number(requiredContext('minCapacity'));
+    const desiredCapacity = Number(requiredContext('desiredCapacity'));
+    const maxCapacity = Number(requiredContext('maxCapacity'));
+    const cpuTarget = Number(requiredContext('cpuTarget'));
+
+    const dbEngine = String(requiredContext('dbEngine'));
+    const dbStorage = Number(requiredContext('dbStorage'));
+    const dbInstanceType = String(requiredContext('dbInstanceType'));
+    const dbMultiAz = String(requiredContext('dbMultiAz')) === 'true';
+
+    const healthCheckPath = String(requiredContext('healthCheckPath'));
+
+    // Validate configuration
     if (!['mysql', 'postgres'].includes(dbEngine)) {
       throw new Error('dbEngine must be mysql or postgres');
     }
-    if (minCapacity > desiredCapacity || desiredCapacity > maxCapacity) {
-      throw new Error('Capacity must satisfy min <= desired <= max');
+
+    if (
+      !Number.isInteger(minCapacity) ||
+      !Number.isInteger(desiredCapacity) ||
+      !Number.isInteger(maxCapacity) ||
+      minCapacity < 0 ||
+      minCapacity > desiredCapacity ||
+      desiredCapacity > maxCapacity
+    ) {
+      throw new Error('Invalid ASG capacity configuration');
     }
 
-    // 2. VPC: public, private and isolated subnets
+    if (
+      !Number.isInteger(maxAzs) ||
+      maxAzs < 2 ||
+      !Number.isInteger(natGateways) ||
+      natGateways < 1 ||
+      natGateways > maxAzs
+    ) {
+      throw new Error('Invalid Availability Zone or NAT Gateway settings');
+    }
+
+    if (!Number.isFinite(cpuTarget) || cpuTarget <= 0 || cpuTarget > 100) {
+      throw new Error('cpuTarget must be between 1 and 100');
+    }
+
+    if (!Number.isInteger(dbStorage) || dbStorage < 20) {
+      throw new Error('dbStorage must be at least 20 GB');
+    }
+
+    if (!healthCheckPath.startsWith('/')) {
+      throw new Error('healthCheckPath must begin with /');
+    }
+
+    // 2. VPC with public, private and isolated subnets
     const vpc = new ec2.Vpc(this, 'CustomVPC', {
-      ipAddresses: ec2.IpAddresses.cidr('10.20.0.0/16'),
-      maxAzs: 2,
-      natGateways: 1,
+      ipAddresses: ec2.IpAddresses.cidr(vpcCidr),
+      maxAzs,
+      natGateways,
       subnetConfiguration: [
         {
           name: 'Public',
@@ -68,19 +110,20 @@ export class MyCdkProjectStack extends cdk.Stack {
       });
     });
 
-    // 3. Security groups
+    // 3. ALB security group
     const albSG = new ec2.SecurityGroup(this, 'ALBSG', {
       vpc,
-      description: 'ALB security group',
+      description: 'Application Load Balancer security group',
       allowAllOutbound: true,
     });
 
     albSG.addIngressRule(
       ec2.Peer.anyIpv4(),
       ec2.Port.tcp(80),
-      'Allow public HTTP'
+      'Allow HTTP from internet'
     );
 
+    // 4. EC2 security group
     const ec2SG = new ec2.SecurityGroup(this, 'EC2SG', {
       vpc,
       description: 'EC2 application security group',
@@ -90,9 +133,10 @@ export class MyCdkProjectStack extends cdk.Stack {
     ec2SG.addIngressRule(
       albSG,
       ec2.Port.tcp(80),
-      'Allow HTTP from ALB'
+      'Allow HTTP from ALB only'
     );
 
+    // 5. RDS security group
     const rdsSG = new ec2.SecurityGroup(this, 'RDSSG', {
       vpc,
       description: 'RDS database security group',
@@ -104,10 +148,10 @@ export class MyCdkProjectStack extends cdk.Stack {
     rdsSG.addIngressRule(
       ec2SG,
       ec2.Port.tcp(dbPort),
-      'Allow database access from EC2'
+      'Allow database traffic from EC2 only'
     );
 
-    // 4. IAM role and instance profile
+    // 6. IAM role and instance profile
     const role = new iam.Role(this, 'EC2Role', {
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
     });
@@ -116,7 +160,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       role,
     });
 
-    // 5. EC2 user data
+    // 7. EC2 user data
     const userData = ec2.UserData.forLinux();
 
     userData.addCommands(
@@ -128,9 +172,8 @@ export class MyCdkProjectStack extends cdk.Stack {
       'systemctl start httpd'
     );
 
-    // 6. EC2 Launch Template
+    // 8. EC2 Launch Template
     const template = new ec2.LaunchTemplate(this, 'LaunchTemplate', {
-      launchTemplateName: 'MyTemplateV1',
       machineImage: ec2.MachineImage.latestAmazonLinux2023(),
       instanceType: new ec2.InstanceType(instanceType),
       securityGroup: ec2SG,
@@ -138,7 +181,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       userData,
     });
 
-    // 7. Auto Scaling Group
+    // 9. Auto Scaling Group
     const asg = new autoscaling.AutoScalingGroup(this, 'ASG', {
       vpc,
       launchTemplate: template,
@@ -151,11 +194,12 @@ export class MyCdkProjectStack extends cdk.Stack {
       groupMetrics: [autoscaling.GroupMetrics.all()],
     });
 
+    // CPU target tracking scaling policy
     asg.scaleOnCpuUtilization('CpuScalingPolicy', {
-      targetUtilizationPercent: 50,
+      targetUtilizationPercent: cpuTarget,
     });
 
-    // 8. Application Load Balancer
+    // 10. Application Load Balancer
     const alb = new elbv2.ApplicationLoadBalancer(this, 'ApplicationALB', {
       vpc,
       internetFacing: true,
@@ -165,22 +209,24 @@ export class MyCdkProjectStack extends cdk.Stack {
       securityGroup: albSG,
     });
 
+    // HTTP listener
     const listener = alb.addListener('HTTPListener', {
       port: 80,
       open: false,
     });
 
+    // Target group and health checks
     listener.addTargets('EC2Targets', {
       port: 80,
       targets: [asg],
       healthCheck: {
-        path: '/health',
+        path: healthCheckPath,
         protocol: elbv2.Protocol.HTTP,
         healthyHttpCodes: '200',
       },
     });
 
-    // 9. RDS database
+    // 11. RDS database engine
     const engine = dbEngine === 'postgres'
       ? rds.DatabaseInstanceEngine.postgres({
           version: rds.PostgresEngineVersion.VER_16,
@@ -189,6 +235,7 @@ export class MyCdkProjectStack extends cdk.Stack {
           version: rds.MysqlEngineVersion.VER_8_0,
         });
 
+    // 12. RDS database
     const database = new rds.DatabaseInstance(this, 'ApplicationDatabase', {
       engine,
       vpc,
@@ -204,15 +251,15 @@ export class MyCdkProjectStack extends cdk.Stack {
       databaseName: 'applicationdb',
       publiclyAccessible: false,
 
-      // Temporary lab settings only
+      // Lab environment only
       deletionProtection: false,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    // Permit EC2 to retrieve database credentials
+    // Allow EC2 role to retrieve database credentials
     database.secret?.grantRead(role);
 
-    // 10. CloudFormation outputs
+    // 13. CloudFormation outputs
     new cdk.CfnOutput(this, 'ALBDNSName', {
       value: alb.loadBalancerDnsName,
     });
