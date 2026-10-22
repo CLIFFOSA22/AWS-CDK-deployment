@@ -1,0 +1,12 @@
+{
+  "context": {
+    "instanceType": "t2.micro",
+    "minCapacity": 1,
+    "desiredCapacity": 2,
+    "maxCapacity": 3,
+    "dbEngine": "mysql",
+    "dbStorage": 20,
+    "dbMultiAz": false,
+    "dbInstanceType": "t3.micro"
+  }
+}
