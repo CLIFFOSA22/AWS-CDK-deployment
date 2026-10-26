@@ -11,7 +11,7 @@ export class MyCdkProjectStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // 1. Read configuration from cdk.json
+    // Read configuration from cdk.json
     const requiredContext = (key: string): unknown => {
       const value = this.node.tryGetContext(key);
       if (value === undefined || value === null || value === '') {
@@ -75,7 +75,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       throw new Error('healthCheckPath must begin with /');
     }
 
-    // 2. VPC with public, private and isolated subnets
+    // VPC with public, private and isolated subnets
     const vpc = new ec2.Vpc(this, 'CustomVPC', {
       ipAddresses: ec2.IpAddresses.cidr(vpcCidr),
       maxAzs,
@@ -110,7 +110,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       });
     });
 
-    // 3. ALB security group
+    // ALB security group
     const albSG = new ec2.SecurityGroup(this, 'ALBSG', {
       vpc,
       description: 'Application Load Balancer security group',
@@ -123,7 +123,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       'Allow HTTP from internet'
     );
 
-    // 4. EC2 security group
+    // EC2 security group
     const ec2SG = new ec2.SecurityGroup(this, 'EC2SG', {
       vpc,
       description: 'EC2 application security group',
@@ -136,7 +136,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       'Allow HTTP from ALB only'
     );
 
-    // 5. RDS security group
+    // RDS security group
     const rdsSG = new ec2.SecurityGroup(this, 'RDSSG', {
       vpc,
       description: 'RDS database security group',
@@ -151,7 +151,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       'Allow database traffic from EC2 only'
     );
 
-    // 6. IAM role and instance profile
+    // IAM role and instance profile
     const role = new iam.Role(this, 'EC2Role', {
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
     });
@@ -160,7 +160,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       role,
     });
 
-    // 7. EC2 user data
+    // EC2 user data
     const userData = ec2.UserData.forLinux();
 
     userData.addCommands(
@@ -172,7 +172,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       'systemctl start httpd'
     );
 
-    // 8. EC2 Launch Template
+    // EC2 Launch Template
     const template = new ec2.LaunchTemplate(this, 'LaunchTemplate', {
       machineImage: ec2.MachineImage.latestAmazonLinux2023(),
       instanceType: new ec2.InstanceType(instanceType),
@@ -181,7 +181,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       userData,
     });
 
-    // 9. Auto Scaling Group
+    // Auto Scaling Group
     const asg = new autoscaling.AutoScalingGroup(this, 'ASG', {
       vpc,
       launchTemplate: template,
@@ -199,7 +199,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       targetUtilizationPercent: cpuTarget,
     });
 
-    // 10. Application Load Balancer
+    // Application Load Balancer
     const alb = new elbv2.ApplicationLoadBalancer(this, 'ApplicationALB', {
       vpc,
       internetFacing: true,
@@ -226,7 +226,7 @@ export class MyCdkProjectStack extends cdk.Stack {
       },
     });
 
-    // 11. RDS database engine
+    // RDS database engine
     const engine = dbEngine === 'postgres'
       ? rds.DatabaseInstanceEngine.postgres({
           version: rds.PostgresEngineVersion.VER_16,
@@ -235,31 +235,33 @@ export class MyCdkProjectStack extends cdk.Stack {
           version: rds.MysqlEngineVersion.VER_8_0,
         });
 
-    // 12. RDS database
-    const database = new rds.DatabaseInstance(this, 'ApplicationDatabase', {
-      engine,
-      vpc,
-      vpcSubnets: {
-        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-      },
-      securityGroups: [rdsSG],
-      instanceType: new ec2.InstanceType(dbInstanceType),
-      allocatedStorage: dbStorage,
-      storageType: rds.StorageType.GP2,
-      multiAz: dbMultiAz,
-      credentials: rds.Credentials.fromGeneratedSecret('admin'),
-      databaseName: 'applicationdb',
-      publiclyAccessible: false,
 
-      // Lab environment only
-      deletionProtection: false,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
+//  RDS database
+const database = new rds.DatabaseInstance(this, 'ApplicationDatabase', {
+  engine,
+  vpc,
+  vpcSubnets: {
+    subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+  },
+  securityGroups: [rdsSG],
+  instanceType: new ec2.InstanceType(dbInstanceType),
+  allocatedStorage: dbStorage,
+  storageType: rds.StorageType.GP2,
+  storageEncrypted: true,
+  multiAz: dbMultiAz,
+  credentials: rds.Credentials.fromGeneratedSecret('dbmaster'),
+  databaseName: 'applicationdb',
+  publiclyAccessible: false,
+
+  // Lab environment only
+  deletionProtection: false,
+  removalPolicy: cdk.RemovalPolicy.DESTROY,
+});
 
     // Allow EC2 role to retrieve database credentials
     database.secret?.grantRead(role);
 
-    // 13. CloudFormation outputs
+    // CloudFormation outputs
     new cdk.CfnOutput(this, 'ALBDNSName', {
       value: alb.loadBalancerDnsName,
     });
